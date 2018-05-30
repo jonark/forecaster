@@ -25,14 +25,17 @@ load_GPX <- function() {
   gpx
 }
 
-find_diff <- function(gpx) {
+calculate_diffs <- function(gpx) {
   gpx[, c('ele_next', 'lat_next', 'lon_next'):= 
               list(lag(ele), lag(lat), lag(lon)),] %>% 
     na.omit(.) %>%
+    .[, ele:= smooth(ele, kind = '3'),] %>% 
     .[, id:= .I,] %>% 
     .[, gain:= as.numeric(ele_next - ele), by = id] %>% 
-    .[, dist:= geosphere::distGeo(c(lat, lon), c(lat_next, lon_next)),
+    .[, displ:= geosphere::distGeo(c(lat, lon), c(lat_next, lon_next)),
       by = id] %>% 
+    .[, dist:= round(cumsum(displ)*0.001,3),] %>% 
+    .[, grade:= round(gain/displ * 100, 1),] %>% 
     select(-ele_next, -lat_next, -lon_next)
 }
 
