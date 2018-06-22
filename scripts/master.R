@@ -1,11 +1,15 @@
 source("scripts/funcs.R")
 
-original_data <- load_GPX()
+file_name <- list.files(pattern = ".gpx$")[1]
+if (is.na(file_name)) {
+  cat("Failed to find gpx file in forecaster directory.\n")
+  return (data.table())
+}
+
+original_data <- load_GPX(file_name)
 if (nrow(data) == 0) {
-  q() # quit R
+  #q() # quit R
 }
 
 data <- calculate_diffs(original_data)
-plot(data$dist, data$gain)
-
-# smooth elevation before finding other stats, remove outliers, find grade
+plot(data$dist, data$grade)
