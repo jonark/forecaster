@@ -4,7 +4,6 @@ import gpxpy
 import geopy.distance as geo
 from os import listdir
 from os.path import isfile, join
-from scipy.optimize import curve_fit
 
 #####################
 def list_files(path):
@@ -19,7 +18,7 @@ def list_files(path):
     return files
     
 #################################
-def load_gpx_to_pd(path_to_file):
+def load_and_transform(path_to_file):
     
     gpx = gpxpy.parse(open(path_to_file, 'r'))
     ls = []
@@ -31,22 +30,16 @@ def load_gpx_to_pd(path_to_file):
                
     df = pd.DataFrame(ls, columns=['lat', 'lon', 'ele', 'time']) 
     
-    return df
+    return transform_data(df)
 
 #######################
 def transform_data(df):
     
     prev_df = df.shift(1, axis=0)
     prev_df.loc[0, :] = df.loc[0, :]
-    
-    # Filter rows where time diffence is 0
-#    prev_df = prev_df.loc[df.dT > 0, :]
-#    df = df.loc[df.dT > 0, :]
-#    prev_df.loc[df.dT == 0, 'dT'] = 1
-#    df.loc[df.dT == 0, 'dT'] = 1
-    
+      
     # Filter rows where elevation gain is more than 100
-    max_gain = 20
+    max_gain = 10
     df.loc[:, 'gain'] = df.ele - prev_df.ele
     
     while len(df.index) != len(df.loc[np.abs(df.gain) < max_gain, :].index):
@@ -60,43 +53,44 @@ def transform_data(df):
         dist.append(geo.distance(coord, prev_coord).km)
     
     df.loc[:, 'dist'] = np.sqrt(np.square(dist) + np.square(df.gain*0.001))
-    df.loc[:, 'grade'] = df.gain / np.sqrt(np.square(df.dist * 1000) - np.square(df.gain))
-    # Smooth grade
-    df.loc[:, 'grade'] = smooth(np.array(df.grade), 6, 'hamming')
+    df.loc[:, 'grade'] = df.gain / dist * 0.001
+     # Smooth grade
+    df.loc[:, 'grade'] = smooth(np.array(df.grade), 7, 'hamming')
     
+
     df.loc[:, 'dT'] = (df.time.astype(int) - prev_df.time.astype(int)) * 1e-9
     df = df.loc[df.dT > 0, :]
-    
-    df.loc[:, 'speed'] = df.dist / df.dT * 3600
-    # Smooth speed
-    df.loc[:, 'speed'] = smooth(np.array(df.speed), 6, 'hamming')
     
     df.fillna(0, inplace=True)
     
     return df[1:]
 
+
 #################################################
 def extract_grade_speed(df, grade_precision = 1):
-    
+       
     tmp = df.copy(deep=True)
     tmp.loc[:, 'grade_r'] = np.round(tmp['grade'], grade_precision)
     
     # Filter some noise
-    tmp = tmp.loc[(tmp.speed < 25) & (tmp.speed > 1) & (tmp.grade_r < 2) & (tmp.grade_r > -1.5), :]
+    tmp.loc[:, 'speed'] = tmp.dist / tmp.dT * 3600
+    tmp = tmp.loc[(tmp.speed < 20) & (tmp.speed > 1) & (tmp.grade_r < 2) & (tmp.grade_r > -1.5), :]
     
+    # Smooth speed
+    tmp.loc[:, 'speed'] = smooth(np.array(tmp.speed), 7, 'hamming')
     new_df = tmp.groupby('grade_r').speed.median().reset_index()
     
     # Normalize to flat speed
-    flat_speed = tmp.loc[(tmp.grade_r < 0.025) & (tmp.grade_r > -0.025), 'speed']
+    flat_speed = tmp.loc[(tmp.grade_r < 0.02) & (tmp.grade_r > -0.02), 'speed']
     flat_speed = np.median(flat_speed)
     new_df['norm_speed'] = new_df.speed / flat_speed
     
     return new_df.reset_index()
 
 ##############################
-def speed_curve(grade, amp1, cen1, wid1, amp2, cen2, wid2):
+def speed_curve(grade, amp, cen1, wid1, cen2, wid2):
     
-    return amp1 * np.exp(-(grade - cen1)**2 / wid1) + amp2 * np.exp(-(grade - cen2)**2 / wid2)
+    return (amp * np.exp(-(grade - cen1)**2 / wid1) + np.exp(-(grade - cen2)**2 / wid2)) / (amp * np.exp(-cen1**2 / wid1) + np.exp(-cen2**2 / wid2))
 
 #############################################
 def smooth(x,window_len=11,window='hanning'):
